@@ -24,20 +24,46 @@ public class EvaluatorBucketingTest {
     LDUser user = new LDUser.Builder("userkey").build();
     String flagKey = "flagkey";
     String salt = "salt";
-    
+
     // First verify that with our test inputs, the bucket value will be greater than zero and less than 100000,
     // so we can construct a rollout whose second bucket just barely contains that value
     int bucketValue = (int)(EvaluatorBucketing.bucketUser(user, flagKey, UserAttribute.KEY, salt) * 100000);
     assertThat(bucketValue, greaterThanOrEqualTo(1));
     assertThat(bucketValue, Matchers.lessThan(100000));
-    
+
     int badVariationA = 0, matchedVariation = 1, badVariationB = 2;
     List<WeightedVariation> variations = Arrays.asList(
         new WeightedVariation(badVariationA, bucketValue), // end of bucket range is not inclusive, so it will *not* match the target value
         new WeightedVariation(matchedVariation, 1), // size of this bucket is 1, so it only matches that specific value
         new WeightedVariation(badVariationB, 100000 - (bucketValue + 1)));
     VariationOrRollout vr = new VariationOrRollout(null, new Rollout(variations, null));
-    
+
+    Integer resultVariation = EvaluatorBucketing.variationIndexForUser(vr, user, flagKey, salt);
+    assertEquals(Integer.valueOf(matchedVariation), resultVariation);
+  }
+
+  @Test
+  public void variationIndexIgnoresTrailingZeroWeightedBuckets() {
+    LDUser user = new LDUser.Builder("userkey").build();
+    String flagKey = "flagkey";
+    String salt = "salt";
+
+    // Generate the bucket value so we can artificially construct a set of buckets that will exclude this value.
+    // In theory these could fail, but SHA1 is static so we'll just pick good constants.
+    int bucketValue = (int)(EvaluatorBucketing.bucketUser(user, flagKey, UserAttribute.KEY, salt) * 100000);
+    assertThat(bucketValue, greaterThanOrEqualTo(2));
+    assertThat(bucketValue, Matchers.lessThan(999999));
+
+    int badVariation = 0, matchedVariation = 1, ignoredVariationA = 2, ignoredVariationB = 3;
+    List<WeightedVariation> variations = Arrays.asList(
+        new WeightedVariation(badVariation, bucketValue - 1), // Two before valid bucket range.
+        new WeightedVariation(matchedVariation, bucketValue), // One before valid bucket range.
+        new WeightedVariation(ignoredVariationA, 0),
+        new WeightedVariation(ignoredVariationB, 0));
+    VariationOrRollout vr = new VariationOrRollout(null, new Rollout(variations, null));
+
+    // No bucket contained the value, but we should still see the last non-zero weighted bucket as
+    // the index we choose.
     Integer resultVariation = EvaluatorBucketing.variationIndexForUser(vr, user, flagKey, salt);
     assertEquals(Integer.valueOf(matchedVariation), resultVariation);
   }
@@ -50,10 +76,10 @@ public class EvaluatorBucketingTest {
 
     // We'll construct a list of variations that stops right at the target bucket value
     int bucketValue = (int)(EvaluatorBucketing.bucketUser(user, flagKey, UserAttribute.KEY, salt) * 100000);
-    
+
     List<WeightedVariation> variations = Arrays.asList(new WeightedVariation(0, bucketValue));
     VariationOrRollout vr = new VariationOrRollout(null, new Rollout(variations, null));
-    
+
     Integer resultVariation = EvaluatorBucketing.variationIndexForUser(vr, user, flagKey, salt);
     assertEquals(Integer.valueOf(0), resultVariation);
   }
